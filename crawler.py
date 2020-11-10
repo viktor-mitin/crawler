@@ -1,12 +1,13 @@
 import requests
+import time
+import argparse
+
 from urllib.parse import urlparse, urljoin
 from bs4 import BeautifulSoup
+from multiprocessing import Pool, Queue, Process, Manager
 
-import multiprocessing
-import time
-
-# initialize the set of links (unique links)
-internal_urls = set()
+max_depth = 0
+num_workers = 10
 
 def is_valid(url):
     """
@@ -40,78 +41,85 @@ def get_all_website_links(url):
         if not is_valid(href):
             # not a valid URL
             continue
-#        if href in internal_urls:
-#            # already in the set
-#            print(f'already')
-#            continue
         if domain_name not in href:
             # external link, skipping
             continue
 
         urls.add(href)
-        internal_urls.add(href)
     return urls
 
 
-def crawl(url, cur_depth=0, cur_proc=0):
+def worker(q,d):
+
+    while True:
+
+        try:
+            item = q.get(timeout=2)
+        except:
+            break
+
+        url = item[0]
+        cur_depth = item[1]
+
+        if cur_depth > max_depth:
+            continue
+
+        if url == 'done':
+            break
+
+        links = get_all_website_links(url)
+
+        for link in links:
+            if link not in d:
+                q.put((link, cur_depth+1))
+
+        d[url] = cur_depth
+        print(f'{url}, {cur_depth}')
+
+
+def crawl(start_url):
     """
     Crawls a web page and extracts all links.
-    params:
-        cur_depth (int): current depth
     """
-    if cur_depth > max_depth:
-        return
 
-    links = get_all_website_links(url)
+    m = Manager()
+    q = m.Queue()
+    d = m.dict()
 
-    if not links:
-        return
+    # Create a group of parallel workers and start them
+    workers_list = []
+    for i in range(num_workers):
+        process = Process(target=worker, args=(q,d))
+        workers_list.append(process)
+        process.start()
 
-    out_file = open(f"{cur_depth}_proc{cur_proc}.txt", "w")
+    q.put((start_url, 0))
 
-    pool = multiprocessing.Pool(processes=4)
-    jobs = []
-    cur_proc=0
+    [process.join() for process in workers_list]
 
-    for link in links:
-        print(link, file=out_file)
-
-#        crawl(link, cur_depth=cur_depth+1)
-#        proc = multiprocessing.Process(target=crawl, args=(link, cur_depth+1, cur_proc))
-
-        proc = pool.apply_async(func=crawl, args=(link, cur_depth+1, cur_proc,))
-        jobs.append(proc)
-        cur_proc += 1
-
-    while(not all([p.ready() for p in jobs])):
-        time.sleep(1)
-
-    # Safely terminate the pool
-    pool.close()
-    pool.join()
+    print(d)
+    print(len(d))
 
 
-    out_file.close()
+def main():
+    global max_depth
+    global num_workers
 
-
-if __name__ == "__main__":
-    import argparse
     parser = argparse.ArgumentParser(description="Link Extractor Tool with Python")
     parser.add_argument("url", help="The URL to extract links from.")
     parser.add_argument("-m", "--max-depth", help="Number of max depth to crawl, default is 10.", default=10, type=int)
+    parser.add_argument("-w", "--num-workers", help="Number of workers, default is 10.", default=10, type=int)
 
     args = parser.parse_args()
     url = args.url
     max_depth = args.max_depth
+    num_workers = args.num_workers
 
     crawl(url)
 
-    print("[+] Total URLs:", len(internal_urls))
+#    print("[+] Total URLs:", len(internal_urls))
 
-    domain_name = urlparse(url).netloc
 
-    # save the internal links to a file
-    with open(f"{domain_name}_internal_links.txt", "w") as f:
-        for internal_link in internal_urls:
-            print(internal_link.strip(), file=f)
+if __name__ == "__main__":
 
+    main()
