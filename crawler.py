@@ -1,10 +1,11 @@
 import requests
 import time
 import argparse
+import multiprocessing as mp
 
 from urllib.parse import urlparse, urljoin
 from bs4 import BeautifulSoup
-from multiprocessing import Pool, Queue, Process, Manager
+from multiprocessing import Queue, Process, Manager
 
 max_depth = 0
 num_workers = 10
@@ -34,9 +35,9 @@ def get_all_website_links(url):
         # join the URL if it's relative (not absolute link)
         href = urljoin(url, href)
 
-        parsed_href = urlparse(href)
-        # remove URL GET parameters, URL fragments, etc.
-        href = parsed_href.scheme + "://" + parsed_href.netloc + parsed_href.path
+#        parsed_href = urlparse(href)
+#        # remove URL GET parameters, URL fragments, etc.
+#        href = parsed_href.scheme + "://" + parsed_href.netloc + parsed_href.path
 
         if not is_valid(href):
             # not a valid URL
@@ -52,9 +53,8 @@ def get_all_website_links(url):
 def worker(q,d):
 
     while True:
-
         try:
-            item = q.get(timeout=2)
+            item = q.get(timeout=5)
         except:
             break
 
@@ -63,9 +63,6 @@ def worker(q,d):
 
         if cur_depth > max_depth:
             continue
-
-        if url == 'done':
-            break
 
         links = get_all_website_links(url)
 
@@ -83,7 +80,7 @@ def crawl(start_url):
     """
 
     m = Manager()
-    q = m.Queue()
+    q = Queue()
     d = m.dict()
 
     # Create a group of parallel workers and start them
@@ -95,7 +92,10 @@ def crawl(start_url):
 
     q.put((start_url, 0))
 
-    [process.join() for process in workers_list]
+#    [process.join() for process in workers_list]
+
+    while len(mp.active_children()) > 1:  #one process for the SyncManager
+        time.sleep(1)
 
     print(d)
     print(len(d))
